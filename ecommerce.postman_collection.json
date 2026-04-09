@@ -1,0 +1,493 @@
+{
+  "info": {
+    "name": "Ecommerce — Anti-padrões em Microsserviços",
+    "description": "Collection completa para testar todos os endpoints do laboratório de anti-padrões.\n\nServiços:\n- order-service       → http://localhost:8080\n- inventory-service   → http://localhost:8081\n- invoice-service     → http://localhost:8082\n- notification-service → http://localhost:8083\n\nSuba o ambiente com: docker-compose up --build",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "order_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "inventory_url",
+      "value": "http://localhost:8081",
+      "type": "string"
+    },
+    {
+      "key": "invoice_url",
+      "value": "http://localhost:8082",
+      "type": "string"
+    },
+    {
+      "key": "notification_url",
+      "value": "http://localhost:8083",
+      "type": "string"
+    },
+    {
+      "key": "order_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "invoice_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "order-service",
+      "description": "Porta 8080 — Orquestrador central do fluxo de compra.\nCada POST /orders chama inventory + invoice + notification de forma síncrona e leva ~3.5s.",
+      "item": [
+        {
+          "name": "Criar pedido",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    if (body.id) {",
+                  "        pm.collectionVariables.set('order_id', body.id);",
+                  "        console.log('order_id salvo:', body.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerId\": 1,\n  \"customerEmail\": \"joao@exemplo.com\",\n  \"items\": [\n    { \"productId\": 1, \"quantity\": 1 },\n    { \"productId\": 2, \"quantity\": 2 }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{order_url}}/orders",
+              "host": ["{{order_url}}"],
+              "path": ["orders"]
+            },
+            "description": "Cria um novo pedido. Internamente chama:\n1. GET /products/{id} para cada item\n2. PUT /products/{id}/reserve para cada item\n3. POST /invoices (bloqueia 2s)\n4. POST /notifications (bloqueia 1.5s)\n\nEspere ~3.5s de resposta.\n\nO ID do pedido criado é automaticamente salvo na variável `order_id`."
+          }
+        },
+        {
+          "name": "Listar pedidos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_url}}/orders",
+              "host": ["{{order_url}}"],
+              "path": ["orders"]
+            },
+            "description": "Retorna todos os pedidos sem paginação.\nAnti-padrão N+1: para cada pedido, dispara uma query extra para buscar os itens (LAZY loading)."
+          }
+        },
+        {
+          "name": "Buscar pedido por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{order_url}}/orders/{{order_id}}",
+              "host": ["{{order_url}}"],
+              "path": ["orders", "{{order_id}}"]
+            },
+            "description": "Busca um pedido específico pelo ID.\nAltere a variável `order_id` na collection ou na URL conforme necessário."
+          }
+        }
+      ]
+    },
+    {
+      "name": "inventory-service",
+      "description": "Porta 8081 — Gerencia o catálogo de produtos e o controle de estoque.\n5 produtos são carregados automaticamente na inicialização.\n\nAnti-padrão principal: reserve sem @Transactional nem locking → race condition clássica.",
+      "item": [
+        {
+          "name": "Listar produtos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventory_url}}/products",
+              "host": ["{{inventory_url}}"],
+              "path": ["products"]
+            },
+            "description": "Retorna todos os produtos com os estoques atuais.\nUse para verificar o stockQuantity após testes de race condition."
+          }
+        },
+        {
+          "name": "Buscar produto por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{inventory_url}}/products/{{product_id}}",
+              "host": ["{{inventory_url}}"],
+              "path": ["products", "{{product_id}}"]
+            },
+            "description": "Busca um produto específico.\nAltere `product_id` (1 a 5) para ver os produtos pré-carregados."
+          }
+        },
+        {
+          "name": "Criar produto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    if (body.id) {",
+                  "        pm.collectionVariables.set('product_id', body.id);",
+                  "        console.log('product_id salvo:', body.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"SSD Samsung 1TB\",\n  \"description\": \"SSD NVMe PCIe 4.0 1TB\",\n  \"price\": 650.00,\n  \"stockQuantity\": 20\n}"
+            },
+            "url": {
+              "raw": "{{inventory_url}}/products",
+              "host": ["{{inventory_url}}"],
+              "path": ["products"]
+            },
+            "description": "Cria um novo produto no catálogo.\nO ID do produto criado é salvo automaticamente na variável `product_id`."
+          }
+        },
+        {
+          "name": "Reservar estoque",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 2\n}"
+            },
+            "url": {
+              "raw": "{{inventory_url}}/products/{{product_id}}/reserve",
+              "host": ["{{inventory_url}}"],
+              "path": ["products", "{{product_id}}", "reserve"]
+            },
+            "description": "Decrementa o estoque do produto.\n\nAnti-padrão: sem @Transactional e sem locking.\nChame este endpoint várias vezes em paralelo (Runner do Postman) para ver a race condition: o estoque pode ir abaixo de zero.\n\nRetorna 500 se o estoque for insuficiente."
+          }
+        },
+        {
+          "name": "[ESTOQUE NEGATIVO] Forçar race condition",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 3\n}"
+            },
+            "url": {
+              "raw": "{{inventory_url}}/products/1/reserve",
+              "host": ["{{inventory_url}}"],
+              "path": ["products", "1", "reserve"]
+            },
+            "description": "Use o Collection Runner do Postman com:\n- Iterations: 10\n- Delay: 0ms\n- Virtual Users: 10 (ou execute via Runner com concorrência)\n\nDepois verifique: GET /products/1 → stockQuantity pode ser negativo.\n\nIsso demonstra a race condition: múltiplas threads leem o mesmo estoque, todas passam na verificação e todas subtraem."
+          }
+        }
+      ]
+    },
+    {
+      "name": "invoice-service",
+      "description": "Porta 8082 — Gera notas fiscais.\nThread bloqueante de 2s por requisição (simula geração de PDF).",
+      "item": [
+        {
+          "name": "Gerar nota fiscal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    if (body.id) {",
+                  "        pm.collectionVariables.set('invoice_id', body.id);",
+                  "        console.log('invoice_id salvo:', body.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": 1,\n  \"customerId\": 42,\n  \"totalAmount\": 3850.00\n}"
+            },
+            "url": {
+              "raw": "{{invoice_url}}/invoices",
+              "host": ["{{invoice_url}}"],
+              "path": ["invoices"]
+            },
+            "description": "Gera uma nota fiscal. Demora ~2 segundos para responder.\n\nAnti-padrão: Thread.sleep(2000) bloqueante — cada request prende 1 thread do Tomcat por 2s.\nSob carga, o pool de threads esgota rapidamente.\n\nO ID da nota criada é salvo na variável `invoice_id`."
+          }
+        },
+        {
+          "name": "Listar notas fiscais",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{invoice_url}}/invoices",
+              "host": ["{{invoice_url}}"],
+              "path": ["invoices"]
+            },
+            "description": "Retorna todas as notas fiscais geradas."
+          }
+        },
+        {
+          "name": "Buscar nota fiscal por ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{invoice_url}}/invoices/{{invoice_id}}",
+              "host": ["{{invoice_url}}"],
+              "path": ["invoices", "{{invoice_id}}"]
+            },
+            "description": "Busca uma nota fiscal específica pelo ID."
+          }
+        }
+      ]
+    },
+    {
+      "name": "notification-service",
+      "description": "Porta 8083 — Envia notificações ao cliente.\nThread bloqueante de 1.5s por requisição (simula envio de e-mail).",
+      "item": [
+        {
+          "name": "Enviar notificação",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderId\": 1,\n  \"customerEmail\": \"joao@exemplo.com\",\n  \"message\": \"Pedido #1 confirmado! Total: R$ 3850.00\"\n}"
+            },
+            "url": {
+              "raw": "{{notification_url}}/notifications",
+              "host": ["{{notification_url}}"],
+              "path": ["notifications"]
+            },
+            "description": "Envia uma notificação. Demora ~1.5 segundos para responder.\n\nAnti-padrão: Thread.sleep(1500) bloqueante — combinado com o invoice-service (2s), cada pedido via order-service bloqueia uma thread por ~3.5s total."
+          }
+        },
+        {
+          "name": "Listar notificações",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notification_url}}/notifications",
+              "host": ["{{notification_url}}"],
+              "path": ["notifications"]
+            },
+            "description": "Retorna todas as notificações enviadas."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cenários de Teste",
+      "description": "Sequências pré-montadas para demonstrar os anti-padrões do sistema.\nExecute na ordem indicada para um fluxo completo.",
+      "item": [
+        {
+          "name": "1. Health Check — Todos os serviços",
+          "item": [
+            {
+              "name": "Health: order-service",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{order_url}}/orders",
+                  "host": ["{{order_url}}"],
+                  "path": ["orders"]
+                }
+              }
+            },
+            {
+              "name": "Health: inventory-service",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{inventory_url}}/products",
+                  "host": ["{{inventory_url}}"],
+                  "path": ["products"]
+                }
+              }
+            },
+            {
+              "name": "Health: invoice-service",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{invoice_url}}/invoices",
+                  "host": ["{{invoice_url}}"],
+                  "path": ["invoices"]
+                }
+              }
+            },
+            {
+              "name": "Health: notification-service",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notification_url}}/notifications",
+                  "host": ["{{notification_url}}"],
+                  "path": ["notifications"]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Fluxo completo — Pedido ponta a ponta",
+          "item": [
+            {
+              "name": "Passo 1: Ver produtos disponíveis",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{inventory_url}}/products",
+                  "host": ["{{inventory_url}}"],
+                  "path": ["products"]
+                },
+                "description": "Veja os IDs e estoques disponíveis antes de criar o pedido."
+              }
+            },
+            {
+              "name": "Passo 2: Criar pedido (espere ~3.5s)",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "if (pm.response.code === 200 || pm.response.code === 201) {",
+                      "    const body = pm.response.json();",
+                      "    if (body.id) pm.collectionVariables.set('order_id', body.id);",
+                      "}"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customerId\": 1,\n  \"customerEmail\": \"joao@exemplo.com\",\n  \"items\": [\n    { \"productId\": 1, \"quantity\": 1 },\n    { \"productId\": 2, \"quantity\": 1 }\n  ]\n}"
+                },
+                "url": {
+                  "raw": "{{order_url}}/orders",
+                  "host": ["{{order_url}}"],
+                  "path": ["orders"]
+                },
+                "description": "Cria o pedido. Internamente chama inventory → invoice (2s) → notification (1.5s).\nObserve o tempo de resposta."
+              }
+            },
+            {
+              "name": "Passo 3: Verificar estoque decrementado",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{inventory_url}}/products",
+                  "host": ["{{inventory_url}}"],
+                  "path": ["products"]
+                },
+                "description": "Confirme que o stockQuantity dos produtos foi reduzido."
+              }
+            },
+            {
+              "name": "Passo 4: Verificar nota fiscal gerada",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{invoice_url}}/invoices",
+                  "host": ["{{invoice_url}}"],
+                  "path": ["invoices"]
+                },
+                "description": "Confirme que a nota fiscal foi criada para o pedido."
+              }
+            },
+            {
+              "name": "Passo 5: Verificar notificação enviada",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{notification_url}}/notifications",
+                  "host": ["{{notification_url}}"],
+                  "path": ["notifications"]
+                },
+                "description": "Confirme que a notificação foi registrada."
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
