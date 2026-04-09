@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    ports:
+      - "8080:8080"
+    environment:
+      - INVENTORY_SERVICE_URL=http://inventory-service:8081
+      - INVOICE_SERVICE_URL=http://invoice-service:8082
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8083
+    depends_on:
+      - inventory-service
+      - invoice-service
+      - notification-service
+
+  inventory-service:
+    build: ./inventory-service
+    container_name: inventory-service
+    ports:
+      - "8081:8081"
+
+  invoice-service:
+    build: ./invoice-service
+    container_name: invoice-service
+    ports:
+      - "8082:8082"
+
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    ports:
+      - "8083:8083"
+
+  # Serviço de testes — acesse http://localhost:9090
+  # Os resultados aparecem nos logs: docker-compose logs -f load-tester
+  load-tester:
+    build: ./load-tester
+    container_name: load-tester
+    ports:
+      - "9090:9090"
+    environment:
+      - ORDER_SERVICE_URL=http://order-service:8080
+      - INVENTORY_SERVICE_URL=http://inventory-service:8081
+      - INVOICE_SERVICE_URL=http://invoice-service:8082
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8083
+    depends_on:
+      - order-service
+      - inventory-service
+      - invoice-service
+      - notification-service
